@@ -1,0 +1,16 @@
+{
+  "mcpServers": {
+    "meta-ads": {
+      "command": "node",
+      "args": ["dist/server.js"],
+      "env": {
+        "META_APP_ID": "",
+        "META_APP_SECRET": "",
+        "META_ACCESS_TOKEN": "",
+        "META_BUSINESS_ID": "",
+        "META_API_VERSION": "v26.0",
+        "ACCOUNTS_CONFIG_PATH": "./accounts.config.json"
+      }
+    }
+  }
+}

@@ -1,0 +1,10 @@
+{
+  "clients": [
+    {
+      "client_id": "example-client",
+      "ad_account_id": "act_1234567890",
+      "access_token_env_var": "META_ACCESS_TOKEN_EXAMPLE_CLIENT",
+      "label": "Example Client Inc."
+    }
+  ]
+}
