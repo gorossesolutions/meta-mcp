@@ -19,7 +19,7 @@ Pas de dépendance à un SaaS tiers (type Pipeboard) : le code appelle directeme
 
 ## État du projet
 
-🚧 En cours de développement. Le squelette du serveur (structure du repo, build, CI) est en place ; les tools MCP listés ci-dessous sont implémentés progressivement, en commençant par les tools de lecture.
+🚧 En cours de développement. Les 7 tools de lecture sont implémentés et testables via `npm run test:manual`. Les tools d'écriture (pause, budgets, création) arrivent ensuite.
 
 ## Structure du projet
 
@@ -153,8 +153,9 @@ npm start       # lance la version compilée
 ## Roadmap
 
 - [x] Scaffold du repo, CI, structure du projet
-- [ ] Authentification Meta (long-lived token, System User)
-- [ ] Tools de lecture
+- [x] Authentification Meta (résolution multi-comptes, long-lived token exchange, support System User)
+- [x] Retry / backoff et gestion d'erreurs Meta (codes 17, 32, 613, HTTP 429)
+- [x] Tools de lecture (7/7)
 - [ ] Tools d'écriture + garde-fou de confirmation budgétaire
-- [ ] Retry / backoff et gestion d'erreurs Meta
 - [ ] Transport Streamable HTTP pour déploiement remote
+- [ ] UI de pilotage (multi-comptes, plages de dates, sélection de métriques) — phase séparée, branchée sur ce MCP
