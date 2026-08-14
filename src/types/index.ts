@@ -1,5 +1,4 @@
 // Shared domain types for the Meta Marketing API wrapper and MCP tools.
-// Populated incrementally as each tool is implemented (see src/tools/).
 
 export interface ClientAccountConfig {
   client_id: string;
@@ -10,4 +9,31 @@ export interface ClientAccountConfig {
 
 export interface AccountsConfig {
   clients: ClientAccountConfig[];
+}
+
+/** Resolved credentials used to call the Graph API for a given request. */
+export interface ResolvedCredentials {
+  accessToken: string;
+  /** act_XXXXXXXXXX, when resolved from a client_id */
+  adAccountId?: string;
+  clientId?: string;
+}
+
+export interface MetaApiErrorPayload {
+  message: string;
+  type?: string;
+  code?: number;
+  error_subcode?: number;
+  fbtrace_id?: string;
+}
+
+export interface GraphApiPaging {
+  cursors?: { before?: string; after?: string };
+  next?: string;
+  previous?: string;
+}
+
+export interface GraphApiListResponse<T> {
+  data: T[];
+  paging?: GraphApiPaging;
 }
