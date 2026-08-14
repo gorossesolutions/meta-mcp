@@ -21,7 +21,8 @@ export class MetaApiError extends Error {
   readonly httpStatus: number;
 
   constructor(payload: MetaApiErrorPayload, httpStatus: number) {
-    super(`Meta API error${payload.code !== undefined ? ` (code ${payload.code})` : ""}: ${payload.message}`);
+    const detail = payload.error_user_msg ?? payload.message;
+    super(`Meta API error${payload.code !== undefined ? ` (code ${payload.code})` : ""}: ${detail}`);
     this.name = "MetaApiError";
     this.code = payload.code;
     this.subcode = payload.error_subcode;
