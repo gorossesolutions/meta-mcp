@@ -14,6 +14,13 @@ import { registerGetAdsTool } from "./tools/read/get-ads.js";
 import { registerGetInsightsTool } from "./tools/read/get-insights.js";
 import { registerGetCreativesTool } from "./tools/read/get-creatives.js";
 import { registerGetAudienceEstimateTool } from "./tools/read/get-audience-estimate.js";
+import { registerUpdateCampaignStatusTool } from "./tools/write/update-campaign-status.js";
+import { registerUpdateAdsetBudgetTool } from "./tools/write/update-adset-budget.js";
+import { registerUpdateAdsetBidTool } from "./tools/write/update-adset-bid.js";
+import { registerCreateCampaignTool } from "./tools/write/create-campaign.js";
+import { registerDuplicateCampaignTool } from "./tools/write/duplicate-campaign.js";
+import { registerDuplicateAdsetTool } from "./tools/write/duplicate-adset.js";
+import { registerUpdateTargetingExclusionsTool } from "./tools/write/update-targeting-exclusions.js";
 
 const server = new McpServer({
   name: "meta-ads-mcp",
@@ -28,9 +35,13 @@ registerGetInsightsTool(server);
 registerGetCreativesTool(server);
 registerGetAudienceEstimateTool(server);
 
-// TODO: register write tools (update_campaign_status, update_adset_budget,
-// update_adset_bid, create_campaign, duplicate_campaign, duplicate_adset,
-// update_targeting_exclusions)
+registerUpdateCampaignStatusTool(server);
+registerUpdateAdsetBudgetTool(server);
+registerUpdateAdsetBidTool(server);
+registerCreateCampaignTool(server);
+registerDuplicateCampaignTool(server);
+registerDuplicateAdsetTool(server);
+registerUpdateTargetingExclusionsTool(server);
 
 async function main() {
   const transport = new StdioServerTransport();
