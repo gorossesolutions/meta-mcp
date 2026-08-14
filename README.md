@@ -19,7 +19,7 @@ Pas de dépendance à un SaaS tiers (type Pipeboard) : le code appelle directeme
 
 ## État du projet
 
-🚧 En cours de développement. Les 7 tools de lecture sont implémentés et testables via `npm run test:manual`. Les tools d'écriture (pause, budgets, création) arrivent ensuite.
+🚧 En cours de développement. Les 14 tools (7 lecture + 7 écriture) sont implémentés. Les tools de lecture sont testables via `npm run test:manual` ; les tools d'écriture ont été validés en mode preview contre un vrai compte (aucune mutation réelle testée en dehors d'une confirmation explicite de l'utilisateur).
 
 ## Structure du projet
 
@@ -122,12 +122,17 @@ Claude Code détecte automatiquement `.mcp.json` à la racine du repo. Pour Clau
 |---|---|
 | `update_campaign_status` | Pause / resume / archive |
 | `update_adset_budget` | Ajustement du budget quotidien / lifetime |
-| `update_adset_bid` | Ajustement de la stratégie d'enchère |
+| `update_adset_bid` | Ajustement du montant ou de la stratégie d'enchère |
 | `create_campaign` | Création — toujours en statut `PAUSED` |
-| `duplicate_campaign` / `duplicate_adset` | Duplication pour tests A/B |
-| `update_targeting_exclusions` | Gestion des audiences d'exclusion |
+| `duplicate_campaign` / `duplicate_adset` | Duplication pour tests A/B — la copie est toujours créée `PAUSED` |
+| `update_targeting_exclusions` | Gestion des audiences/zones/intérêts d'exclusion |
 
-**Règle de sécurité non négociable** : toute action qui modifie un budget de plus de `BUDGET_CHANGE_CONFIRMATION_THRESHOLD_PERCENT` (20% par défaut) ou qui active une campagne renvoie un objet de confirmation explicite avant exécution — jamais d'exécution silencieuse sur les actions à fort impact budgétaire.
+**Règle de sécurité non négociable** : aucun tool d'écriture n'exécute quoi que ce soit au premier appel. Chaque tool suit un pattern **preview → confirm** :
+
+1. Appelé sans `confirm: true`, il renvoie un aperçu structuré (`status: "preview_only"`) avec l'état actuel, le changement proposé, et — pour les budgets — le delta en % calculé automatiquement (avertissement si supérieur à `BUDGET_CHANGE_CONFIRMATION_THRESHOLD_PERCENT`, 20% par défaut). Aucun appel d'écriture n'est fait à la Graph API à ce stade.
+2. Il faut un second appel explicite avec `confirm: true` pour que la mutation soit réellement exécutée.
+
+Cette validation humaine systématique est non négociable, quel que soit le type ou l'ampleur de l'action. Elle est conçue pour rester compatible avec un futur mode **Autopilot** (UI séparée) : quand ce toggle sera actif, l'orchestrateur pourra passer `confirm: true` automatiquement pour les actions à faible risque, mais devra **toujours** exiger une confirmation explicite (modale) pour toute hausse de budget — cette exception ne peut pas être appliquée par le serveur MCP lui-même (il ne sait pas qui l'appelle), elle doit être respectée par la couche orchestratrice qui pilotera l'Autopilot.
 
 ## Gestion des erreurs et rate limits
 
@@ -156,6 +161,6 @@ npm start       # lance la version compilée
 - [x] Authentification Meta (résolution multi-comptes, long-lived token exchange, support System User)
 - [x] Retry / backoff et gestion d'erreurs Meta (codes 17, 32, 613, HTTP 429)
 - [x] Tools de lecture (7/7)
-- [ ] Tools d'écriture + garde-fou de confirmation budgétaire
+- [x] Tools d'écriture (7/7) + garde-fou preview/confirm systématique
 - [ ] Transport Streamable HTTP pour déploiement remote
 - [ ] UI de pilotage (multi-comptes, plages de dates, sélection de métriques) — phase séparée, branchée sur ce MCP
