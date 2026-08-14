@@ -61,7 +61,7 @@ export function registerDuplicateAdsetTool(server: McpServer): void {
         {
           deep_copy: deepCopy,
           status_option: "PAUSED",
-          rename_options: JSON.stringify({ rename_strategy: "ONLY_TOP_LEVEL_NAME", rename_suffix: suffix }),
+          rename_options: JSON.stringify({ rename_strategy: "ONLY_TOP_LEVEL_RENAME", rename_suffix: suffix }),
           campaign_id: target_campaign_id,
         },
         accessToken,
