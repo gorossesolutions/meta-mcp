@@ -11,6 +11,12 @@
 // Requires .env to be loaded (e.g. `node --env-file=.env` or export the
 // vars yourself) and, for get_audience_estimate, a real ad account with
 // delivery_estimate access.
+//
+// At the end, prints a "Field availability" report: several fields (learning
+// phase status, ad relevance rankings) are only populated under specific
+// conditions (ad set actively delivering, ad past ~500 impressions) — this
+// report makes explicit what actually comes back null/UNKNOWN on this
+// account, rather than hiding it inside a wall of JSON.
 
 import { listAdAccounts } from "../src/tools/read/list-ad-accounts.js";
 import { getCampaigns } from "../src/tools/read/get-campaigns.js";
@@ -48,26 +54,38 @@ async function main() {
     process.exit(1);
   }
 
-  await run("list_ad_accounts", () => listAdAccounts({ client_id: clientId }));
+  const accounts = await run("list_ad_accounts", () => listAdAccounts({ client_id: clientId }));
+  const firstAccount = accounts?.[0];
 
   const campaigns = await run("get_campaigns", () =>
     getCampaigns({ client_id: clientId, account_id: accountId, limit: 5 }),
   );
-  const firstCampaignId = Array.isArray(campaigns)
-    ? (campaigns[0] as { id?: string } | undefined)?.id
-    : undefined;
+  const firstCampaignId = (campaigns?.[0] as { id?: string } | undefined)?.id;
 
-  await run("get_adsets", () =>
+  const adsets = await run("get_adsets", () =>
     getAdsets({ client_id: clientId, account_id: accountId, campaign_id: firstCampaignId, limit: 5 }),
   );
+  const firstAdset = adsets?.[0] as { id?: string; learning_phase?: Record<string, unknown> } | undefined;
 
-  await run("get_ads", () =>
+  const ads = await run("get_ads", () =>
     getAds({ client_id: clientId, account_id: accountId, campaign_id: firstCampaignId, limit: 5 }),
   );
+  const firstAdId = (ads?.[0] as { id?: string } | undefined)?.id;
 
-  await run("get_insights", () =>
+  await run("get_insights (account/campaign level)", () =>
     getInsights({ client_id: clientId, account_id: accountId, object_id: firstCampaignId, date_preset: "last_30d" }),
   );
+
+  const adInsights = await run("get_insights (ad level, with quality rankings)", () =>
+    getInsights({
+      client_id: clientId,
+      account_id: accountId,
+      object_id: firstAdId,
+      level: "ad",
+      date_preset: "maximum",
+    }),
+  );
+  const firstAdInsight = adInsights?.[0] as Record<string, unknown> | undefined;
 
   await run("get_creatives", () => getCreatives({ client_id: clientId, account_id: accountId, limit: 5 }));
 
@@ -78,6 +96,32 @@ async function main() {
       targeting: { geo_locations: { countries: ["FR"] }, age_min: 25, age_max: 45 },
     }),
   );
+
+  console.log("\n=== Field availability report ===");
+  const rows: Array<[string, string]> = [
+    ["list_ad_accounts.business", firstAccount?.business ? JSON.stringify(firstAccount.business) : "MISSING"],
+    ["get_adsets.learning_phase.status", String(firstAdset?.learning_phase?.status ?? "null")],
+    ["get_adsets.learning_phase.conversions", String(firstAdset?.learning_phase?.conversions ?? "null")],
+    [
+      "get_adsets.learning_phase.attribution_windows",
+      JSON.stringify(firstAdset?.learning_phase?.attribution_windows ?? null),
+    ],
+    ["get_insights(ad).quality_ranking", String(firstAdInsight?.quality_ranking ?? "MISSING")],
+    ["get_insights(ad).engagement_rate_ranking", String(firstAdInsight?.engagement_rate_ranking ?? "MISSING")],
+    ["get_insights(ad).conversion_rate_ranking", String(firstAdInsight?.conversion_rate_ranking ?? "MISSING")],
+    ["get_insights(ad).inline_link_clicks", String(firstAdInsight?.inline_link_clicks ?? "MISSING")],
+    [
+      "get_insights(ad).cost_per_action_type",
+      Array.isArray(firstAdInsight?.cost_per_action_type) ? `${firstAdInsight.cost_per_action_type.length} entries` : "MISSING",
+    ],
+  ];
+  for (const [field, value] of rows) {
+    console.log(`  ${field.padEnd(45)} ${value}`);
+  }
+  console.log(
+    "\nNote: learning_phase.status/conversions are null unless the ad set is actively delivering (effective_status ACTIVE).",
+  );
+  console.log("Note: quality/engagement/conversion rankings return \"UNKNOWN\" below ~500 impressions on the ad.");
 }
 
 main();
