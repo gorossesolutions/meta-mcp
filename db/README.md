@@ -1,6 +1,6 @@
 # Base de données — Neon Postgres
 
-Schéma de persistance pour meta-ads-mcp : un seul projet Neon, une seule base, cloisonnement par `client_id`. Ce dossier ne contient que le schéma (migrations SQL + runner) — le job de synchronisation qui remplit ces tables, le transport HTTP et le frontend sont des chantiers séparés (voir `docs/AUDIT.md`).
+Schéma de persistance pour meta-ads-mcp : un seul projet Neon, une seule base, cloisonnement par `client_id`. Ce dossier contient le schéma (migrations SQL + runner, `db/migrations/` + `db/migrate.ts`) et le job de synchronisation Meta → Neon (`db/sync/`) qui les remplit. Le transport HTTP et le frontend restent des chantiers séparés (voir `docs/AUDIT.md`).
 
 ## Setup
 
@@ -18,19 +18,81 @@ Le script applique les fichiers de `db/migrations/` dans l'ordre, dans une table
 
 ### Étape manuelle obligatoire après la première migration
 
-`db/migrations/0008_rls.sql` crée un rôle `svc_sync` **sans mot de passe** (jamais de secret en clair dans un fichier commité). Avant que le futur job de sync puisse s'y connecter :
+`db/migrations/0008_rls.sql` crée un rôle `svc_sync` **sans mot de passe** (jamais de secret en clair dans un fichier commité). Avant que le job de sync puisse s'y connecter :
 
 ```sql
 -- Dans la console SQL Neon, PAS dans un fichier du repo :
 ALTER ROLE svc_sync WITH PASSWORD 'un-mot-de-passe-fort-genere';
 ```
 
-Construis ensuite `DATABASE_URL_SYNC` avec ce mot de passe et ajoute-le à `.env` (jamais commité, `.gitignore` le protège déjà).
+Construis ensuite `DATABASE_URL_SYNC` avec ce mot de passe et ajoute-le à `.env` (jamais commité, `.gitignore` le protège déjà). Le job refuse de démarrer tant que cette variable n'est pas configurée avec un rôle qui répond bien `svc_sync` à `SELECT current_user` — voir "Garde-fou svc_sync" ci-dessous.
+
+## Job de synchronisation Meta → Neon (`db/sync/`)
+
+```bash
+npm run db:sync -- --client gr-adlab-main --days 7      # sync courante, 7 derniers jours
+npm run db:sync -- --all --days 3                        # tous les clients actifs
+npm run db:sync -- --client gr-adlab-main --dry-run       # aperçu, aucune écriture
+npm run db:sync -- --client gr-adlab-main --since 2026-01-01 --until 2026-08-01 --backfill
+npm run db:sync -- --client gr-adlab-main --breakdown age --days 30
+```
+
+### Architecture : pas de MCP ici
+
+Ce job **n'utilise pas le protocole MCP**. Il importe directement les fonctions des tools de lecture (`src/tools/read/*.ts`) et le client HTTP partagé (`src/client/meta-api.ts`) — exactement comme `test/manual-check.ts` le fait déjà depuis l'Étape 1. Le MCP est un protocole pour qu'un client conversationnel (Claude) parle aux tools ; un job serveur qui tourne en CLI n'a aucun usage de cette indirection, qui n'ajouterait que de la latence et un point de panne de plus. Aucune logique n'a été dupliquée pour ça — la réutilisation était déjà possible parce que chaque tool de lecture exporte sa logique en fonction simple, séparée de son enregistrement MCP.
+
+### Garde-fou svc_sync
+
+`db/sync/guard.ts` exécute `SELECT current_user` juste après la connexion et refuse de continuer si la réponse n'est pas `svc_sync` — **avant** la moindre autre requête. Pas de flag pour désactiver ce contrôle. La raison : le rôle owner de Neon porte `BYPASSRLS` (voir "Modèle de sécurité" ci-dessus) — une connexion accidentelle avec `DATABASE_URL` au lieu de `DATABASE_URL_SYNC` contournerait le RLS intégralement, silencieusement. Vérifié en conditions réelles pendant cette session : pointer `DATABASE_URL_SYNC` vers la connection string owner fait échouer le job immédiatement avec un message explicite, jamais un contournement silencieux.
+
+### Options
+
+| Option | Effet |
+|---|---|
+| `--client <slug>` | Synchronise ce seul client (le `client_id` d'`accounts.config.json`) |
+| `--all` | Synchronise tous les clients d'`accounts.config.json` dont le client Neon correspondant est actif (`clients.is_active`) — un nouveau client est actif par défaut à son premier bootstrap |
+| `--days <N>` | Fenêtre d'insights = N derniers jours (défaut 7) |
+| `--since` / `--until` | Fenêtre explicite `YYYY-MM-DD`, prioritaire sur `--days` |
+| `--backfill` | Découpe la fenêtre en lots de 30 jours, un appel insights séquentiel par lot — voir "Rattrapage" ci-dessous |
+| `--breakdown <dim>` | Une seule dimension de ventilation (`age`, `gender`, `publisher_platform`, `platform_position`, `impression_device`, `device_platform`, `region`, `country`). **Passer ce flag plusieurs fois est une erreur bloquante** — combiner des ventilations multiplie le nombre de lignes par leur produit cartésien, jamais autorisé depuis ce CLI |
+| `--dry-run` | Affiche ce qui serait écrit, n'écrit rien — pas même une ligne `sync_runs` |
+
+### Ce que fait chaque étape
+
+0. **Bootstrap client** : upsert dans `clients` à partir de l'entrée `accounts.config.json` (clé de correspondance : `clients.config_client_id`, voir `db/migrations/0009_clients_config_bridge.sql`). Le job de sync est la seule chose qui crée des lignes `clients` — cohérent avec le RLS qui restreint déjà `INSERT` sur `clients` à `svc_sync`.
+1. **Ouverture `sync_runs`** : une ligne `status='running'` est insérée **avant** le premier appel Meta, pas après — un crash en cours de route laisse une ligne visible "en cours", jamais rien du tout.
+2. **`ad_accounts`** : devise, fuseau, portefeuille business.
+3. **Snapshots** : campagnes → ad sets (par campagne) → ads (par ad set), upsertés dans `campaigns_snapshot`/`adsets_snapshot`/`ads_snapshot` avec la date du jour (UTC) comme `captured_date`. La phase d'apprentissage est normalisée ici (voir Conventions ci-dessus).
+4. **Creatives** : liste complète du compte (`/adcreatives`), pas un appel par ad — bien plus efficace. **Limite de page abaissée à 50** (pas 500) : Meta rejette une page de 500 creatives avec `object_story_spec` inclus ("reduce the amount of data you're asking for"), confirmé en conditions réelles pendant cette session.
+5. **`creative_angles`** : parsing optionnel du nom de l'ad (voir "Angles créatifs" ci-dessous). Ni écriture ni tentative sur les lignes déjà taguées manuellement.
+6. **`insights_daily`** : un appel par ad, sur la fenêtre demandée (ou par lot si `--backfill`).
+7. **Clôture `sync_runs`** : statut (`success`/`partial`/`failed`), `entities_processed`, `error_message`, `rate_limit_usage_peak_percent`.
+
+### Isolation des erreurs
+
+- **Par client** : une exception non rattrapée pendant le sync d'un client (ex. token expiré) est catchée au niveau de la boucle principale — les autres clients passés à `--all` se synchronisent quand même.
+- **Par étape** : chaque étape (campagnes, ad sets par campagne, ads par ad set, creatives, insights) a son propre `try/catch`. Une erreur sur une étape n'empêche pas les étapes suivantes de tourner, et n'annule jamais ce qui a déjà été écrit — pas de rollback global. Le statut final est `partial` si au moins une étape a échoué mais que d'autres ont réussi, `failed` si même la récupération du compte publicitaire échoue (rien d'exploitable n'a pu être écrit), `success` sinon. Observé en conditions réelles pendant cette session : un vrai rate limit Meta (code 17) sur un appel `adsets_snapshot` a produit un run `partial` sans toucher aux données déjà écrites par les étapes précédentes.
+
+### Rattrapage initial (`--backfill`)
+
+La fenêtre demandée est découpée en lots de 30 jours, traités séquentiellement — un appel insights par lot et par ad, pas un seul appel géant. Reprenable après interruption **sans mécanisme de checkpoint dédié** : chaque upsert `insights_daily` est idempotent sur sa clé naturelle, donc relancer la même commande après un Ctrl+C ré-upserte sans risque les lots déjà faits (coût : quelques appels Meta redondants) et continue au-delà. Choix délibéré plus simple qu'un système de suivi de progression, suffisant tant que les fenêtres de rattrapage restent de l'ordre de quelques mois.
+
+### Rate limits
+
+Backoff réactif (déjà en place depuis l'Étape 1, `src/client/meta-api.ts`) **et** ralentissement proactif désormais : le header `X-Business-Use-Case-Usage` est lu après chaque appel ; au-delà de `META_RATE_LIMIT_THROTTLE_THRESHOLD_PERCENT` (80% par défaut), le job dort `META_RATE_LIMIT_THROTTLE_DELAY_MS` (3s par défaut) avant l'appel suivant, plutôt que d'attendre l'erreur. Le pic observé pendant le run est journalisé dans `sync_runs.rate_limit_usage_peak_percent`.
+
+Point important observé en conditions réelles : ce header reste bas (4-6 % pendant les tests de cette session) même quand un **autre** mécanisme de rate limit Meta (la fréquence d'appels sur un compte publicitaire donné, erreur code 17) se déclenche. Les deux sont indépendants — le throttling proactif sur le header ne dispense pas du backoff réactif, qui reste la vraie protection contre ce second type de limite.
+
+### Angles créatifs (`creative_angles`)
+
+- **Invariant `first_seen_date`** : à chaque upsert d'une ligne parsée, la date retenue est la plus ancienne entre la propre date de lancement de l'ad courante et le minimum des `first_seen_date` déjà enregistrés pour ce même `angle_label` chez ce client (`db/sync/upserts.ts:upsertParsedCreativeAngle`, requête `LEAST(...)`). Un angle réutilisé sur une nouvelle ad ne fait donc jamais avancer sa date de première apparition.
+- **Jamais d'écrasement d'une saisie manuelle** : la clause `ON CONFLICT ... WHERE creative_angles.source = 'parsed'` fait que la mise à jour est silencieusement ignorée si la ligne existante a `source = 'manual'` — appliqué au niveau SQL, pas seulement en logique applicative.
+- **Parsing désactivable et paramétrable** : contrôlé par `AD_NAME_ANGLE_PATTERN` (regex avec groupes nommés `(?<category>...)`, `(?<label>...)`, `(?<hook>...)`, `(?<format>...)`). Vide par défaut = parsing désactivé, aucune convention codée en dur. Seul `label` est requis pour qu'une ligne soit créée ; si le pattern ne matche pas ou que `label` est absent, l'ad reste simplement non taguée, disponible pour une saisie manuelle future — jamais de catégorie inventée par défaut.
 
 ## Relations (diagramme textuel)
 
 ```
-clients (partitionnement racine)
+clients (partitionnement racine ; config_client_id = pont vers accounts.config.json, voir db/sync/)
  ├─ user_clients ──────────► qui (user Neon Auth) voit quel client
  ├─ ad_accounts ───────────► comptes Meta rattachés au client
  │   ├─ campaigns_snapshot ─► un enregistrement par jour de capture
