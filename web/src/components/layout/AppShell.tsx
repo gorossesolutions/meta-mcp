@@ -36,7 +36,7 @@ export function AppShell({ clientId, children }: { clientId?: string; children: 
                 toggle — the header background stays navy in both, so UserButton
                 should always render its light-on-dark colors here. */}
             <div className="dark">
-              <UserButton />
+              <UserButton classNames={{ trigger: { user: { subtitle: "hidden" } } }} />
             </div>
           </div>
         </div>
