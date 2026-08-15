@@ -12,11 +12,21 @@ export interface UseEntityMetricsResult {
   error: string | null;
 }
 
+const METRIC_COLUMNS =
+  "date,impressions,reach,frequency,clicks,inline_link_clicks,ctr,cpc_minor,cpm_minor,spend_minor,currency,actions,action_values,cost_per_action_type,purchase_roas,quality_ranking,engagement_rate_ranking,conversion_rate_ranking";
+
 /**
  * Fetches unbroken-down insights_daily rows (all breakdown_* = '', see
  * db/README.md) for a set of entities over a period, and aggregates them
  * per entity. Client-side aggregation — fine at current volume, see
  * lib/metrics.ts scale note.
+ *
+ * db/sync only ever writes entity_type='ad' rows (see db/README.md
+ * "Incident" notes) — campaign/adset levels are rolled up here from
+ * insights_daily_ad_rollup (a view joining insights_daily to ads_latest)
+ * instead of querying for rows that would never exist. reach/frequency at
+ * those levels are therefore a sum across ads, not Meta's own deduplicated
+ * figure — see the migration's comment for why that tradeoff was made.
  */
 export function useEntityMetrics(
   adAccountId: string | undefined,
@@ -40,14 +50,27 @@ export function useEntityMetrics(
     setLoading(true);
     setError(null);
 
-    neon
-      .from("insights_daily")
-      .select(
-        "meta_entity_id,date,impressions,reach,frequency,clicks,inline_link_clicks,ctr,cpc_minor,cpm_minor,spend_minor,currency,actions,action_values,cost_per_action_type,purchase_roas,quality_ranking,engagement_rate_ranking,conversion_rate_ranking",
-      )
-      .eq("ad_account_id", adAccountId)
-      .eq("entity_type", entityType)
-      .in("meta_entity_id", metaEntityIds)
+    const query =
+      entityType === "campaign"
+        ? neon
+            .from("insights_daily_ad_rollup")
+            .select(`meta_entity_id:meta_campaign_id,${METRIC_COLUMNS}`)
+            .eq("ad_account_id", adAccountId)
+            .in("meta_campaign_id", metaEntityIds)
+        : entityType === "adset"
+          ? neon
+              .from("insights_daily_ad_rollup")
+              .select(`meta_entity_id:meta_adset_id,${METRIC_COLUMNS}`)
+              .eq("ad_account_id", adAccountId)
+              .in("meta_adset_id", metaEntityIds)
+          : neon
+              .from("insights_daily")
+              .select(`meta_entity_id,${METRIC_COLUMNS}`)
+              .eq("ad_account_id", adAccountId)
+              .eq("entity_type", entityType)
+              .in("meta_entity_id", metaEntityIds);
+
+    query
       .eq("breakdown_age", "")
       .eq("breakdown_gender", "")
       .eq("breakdown_publisher_platform", "")

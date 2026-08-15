@@ -88,7 +88,7 @@ Ce job **n'utilise pas le protocole MCP**. Il importe directement les fonctions 
 3. **Snapshots** : campagnes → ad sets (par campagne) → ads (par ad set), upsertés dans `campaigns_snapshot`/`adsets_snapshot`/`ads_snapshot` avec la date du jour (UTC) comme `captured_date`. La phase d'apprentissage est normalisée ici (voir Conventions ci-dessus).
 4. **Creatives** : liste complète du compte (`/adcreatives`), pas un appel par ad — bien plus efficace. **Limite de page abaissée à 50** (pas 500) : Meta rejette une page de 500 creatives avec `object_story_spec` inclus ("reduce the amount of data you're asking for"), confirmé en conditions réelles pendant cette session.
 5. **`creative_angles`** : parsing optionnel du nom de l'ad (voir "Angles créatifs" ci-dessous). Ni écriture ni tentative sur les lignes déjà taguées manuellement.
-6. **`insights_daily`** : un appel par ad, sur la fenêtre demandée (ou par lot si `--backfill`).
+6. **`insights_daily`** : un appel par ad, sur la fenêtre demandée (ou par lot si `--backfill`), avec `time_increment: 1` — voir "Insights : granularité et niveaux" ci-dessous.
 7. **Clôture `sync_runs`** : statut (`success`/`partial`/`failed`), `entities_processed`, `error_message`, `rate_limit_usage_peak_percent`.
 
 ### Isolation des erreurs
@@ -99,6 +99,14 @@ Ce job **n'utilise pas le protocole MCP**. Il importe directement les fonctions 
 ### Rattrapage initial (`--backfill`)
 
 La fenêtre demandée est découpée en lots de 30 jours, traités séquentiellement — un appel insights par lot et par ad, pas un seul appel géant. Reprenable après interruption **sans mécanisme de checkpoint dédié** : chaque upsert `insights_daily` est idempotent sur sa clé naturelle, donc relancer la même commande après un Ctrl+C ré-upserte sans risque les lots déjà faits (coût : quelques appels Meta redondants) et continue au-delà. Choix délibéré plus simple qu'un système de suivi de progression, suffisant tant que les fenêtres de rattrapage restent de l'ordre de quelques mois.
+
+### Insights : granularité et niveaux (`time_increment`, rollup)
+
+**`time_increment`** : `get_insights` (donc le sync) passe désormais `time_increment: 1` à chaque appel. Sans ce paramètre, l'API Meta Insights agrège toute la fenêtre `since..until` en **une seule ligne** (`date_start`/`date_stop` couvrant toute la plage demandée) plutôt que de renvoyer une ligne par jour — confirmé en conditions réelles pendant la session Étape 5 : une requête de 31 jours sans `time_increment` renvoyait une unique ligne de 27,63 € au lieu de 5 lignes journalières. `upsertInsightRow` stocke chaque ligne reçue sous `row.date_start` comme `insights_daily.date` — sans `time_increment: 1`, un mois entier se retrouvait ainsi upserté comme si c'était la donnée d'un seul jour, corrompant silencieusement `insights_daily` (conçue pour une ligne = un jour, voir `0005_insights_daily.sql`). Un appel ad-hoc au tool MCP `get_insights` peut toujours omettre `time_increment` pour obtenir un total agrégé unique — seul le job de sync l'impose systématiquement.
+
+**Niveaux non synchronisés** : le sync n'écrit que des lignes `entity_type='ad'` (un appel Meta par ad, jamais par adset/campagne/compte — 4x moins d'appels API). La vue `insights_daily_ad_rollup` (`0014_insights_ad_rollup_view.sql`) remonte ces lignes au niveau adset/campagne en joignant sur `ads_latest`, sans appel Meta supplémentaire — c'est elle que le dashboard interroge pour les pages Campagnes/Ad sets. Compromis assumé : `reach`/`frequency` au niveau remonté sont une **somme** sur les ads, pas le chiffre dédupliqué que Meta calculerait nativement pour l'adset/la campagne (deux ads pouvant toucher la même personne) — directionnel, pas exact, pour ces deux métriques précises. Spend/impressions/clics et tout ce qui en dérive restent exacts (pas de double-comptage possible sur ces métriques-là).
+
+**Piège de cache Data API observé en ajoutant cette vue** : après avoir créé `insights_daily_ad_rollup` et l'avoir grantée à `authenticated`, le dashboard a continué à répondre `PGRST205 Could not find the table 'public.insights_daily_ad_rollup' in the schema cache` pendant plus d'une minute, alors qu'un `curl` direct contre le même endpoint la reconnaissait déjà (juste une erreur d'auth, pas "table introuvable") — signe que le cache de schéma du Data API Neon n'est pas instantanément cohérent entre requêtes/instances. `NOTIFY pgrst, 'reload schema'` envoyé manuellement n'a pas eu d'effet visible immédiat non plus. Patienter (~1-2 min) après toute migration qui ajoute une table/vue avant de tester le dashboard — pas un bug côté code applicatif si un 404 "table not found" apparaît juste après une migration.
 
 ### Rate limits
 
@@ -131,6 +139,9 @@ clients (partitionnement racine ; config_client_id = pont vers accounts.config.j
 
 campaigns_latest / adsets_latest / ads_latest = vues "état le plus récent"
 (DISTINCT ON sur les tables *_snapshot correspondantes)
+
+insights_daily_ad_rollup = insights_daily (entity_type='ad' uniquement, voir
+ci-dessous) remonté au niveau adset/campagne via jointure sur ads_latest
 ```
 
 Toutes les tables enfants portent `client_id` en dur (dénormalisé depuis `ad_accounts.client_id` ou `optimization_reports.client_id`), même quand il est dérivable via jointure — c'est un choix délibéré, voir "Modèle de sécurité" ci-dessous.
