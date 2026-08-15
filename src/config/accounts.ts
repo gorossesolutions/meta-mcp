@@ -4,7 +4,15 @@
 import { readFileSync } from "node:fs";
 import type { AccountsConfig, ClientAccountConfig } from "../types/index.js";
 
+// Short TTL rather than an unbounded cache: this file previously assumed a
+// short-lived stdio process (load once, exit soon after). A long-running
+// service (HTTP transport, a future sync job) can now add a client to
+// accounts.config.json and have it picked up without a restart, just with
+// a bounded delay instead of an instant reload on every call.
+const CACHE_TTL_MS = 30_000;
+
 let cachedConfig: AccountsConfig | undefined;
+let cachedAt = 0;
 
 function isClientAccountConfig(value: unknown): value is ClientAccountConfig {
   if (typeof value !== "object" || value === null) return false;
@@ -17,7 +25,7 @@ function isClientAccountConfig(value: unknown): value is ClientAccountConfig {
 }
 
 export function loadAccountsConfig(path: string): AccountsConfig {
-  if (cachedConfig) return cachedConfig;
+  if (cachedConfig && Date.now() - cachedAt < CACHE_TTL_MS) return cachedConfig;
 
   let raw: string;
   try {
@@ -26,6 +34,7 @@ export function loadAccountsConfig(path: string): AccountsConfig {
     // No multi-account config file — that's fine, callers fall back to the
     // default META_ACCESS_TOKEN / an explicit ad_account_id per call.
     cachedConfig = { clients: [] };
+    cachedAt = Date.now();
     return cachedConfig;
   }
 
@@ -48,6 +57,7 @@ export function loadAccountsConfig(path: string): AccountsConfig {
   }
 
   cachedConfig = { clients: clients as ClientAccountConfig[] };
+  cachedAt = Date.now();
   return cachedConfig;
 }
 
@@ -64,4 +74,5 @@ export function findClientAccount(clientId: string, path: string): ClientAccount
 /** Reset the in-memory config cache. Exposed for tests. */
 export function resetAccountsConfigCache(): void {
   cachedConfig = undefined;
+  cachedAt = 0;
 }
