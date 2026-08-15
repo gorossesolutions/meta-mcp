@@ -80,7 +80,7 @@ cp .env.example .env
 cp accounts.config.json.example accounts.config.json
 ```
 
-Remplis `.env` avec tes identifiants Meta (voir tableau ci-dessous), puis déclare chaque client dans `accounts.config.json` (fichier ignoré par git — ne jamais le commiter s'il contient des tokens en clair).
+Remplis `.env` avec tes identifiants Meta (voir tableau ci-dessous), puis déclare chaque client dans `accounts.config.json` (fichier ignoré par git — ne jamais le commiter s'il contient des tokens en clair). Ce fichier est mis en cache 30s en mémoire (`src/config/accounts.ts`) : ajouter un client n'exige pas de redémarrer le serveur, juste d'attendre jusqu'à 30s.
 
 | Variable | Description |
 |---|---|
@@ -108,13 +108,19 @@ Claude Code détecte automatiquement `.mcp.json` à la racine du repo. Pour Clau
 
 | Tool | Description |
 |---|---|
-| `list_ad_accounts` | Liste les comptes publicitaires accessibles |
-| `get_campaigns` | Liste des campagnes (statut, objectif, budget) |
-| `get_adsets` | Ad sets, avec résumé du targeting |
-| `get_ads` | Ads, avec creative associé |
-| `get_insights` | Métriques (impressions, reach, CTR, CPC, CPM, ROAS, conversions), filtres `date_range` et `breakdown` (âge, genre, placement, device) |
+| `list_ad_accounts` | Liste les comptes publicitaires accessibles, avec le portefeuille business propriétaire (`business.id`/`business.name`), la devise et le fuseau horaire |
+| `get_campaigns` | Liste des campagnes (statut, objectif, budget, `created_time`/`updated_time`) |
+| `get_adsets` | Ad sets, avec résumé du targeting, `created_time`/`updated_time`, et `learning_phase` (phase d'apprentissage) |
+| `get_ads` | Ads, avec creative associé et `created_time`/`updated_time` |
+| `get_insights` | Métriques (impressions, reach, CTR, CPC, CPM, ROAS, conversions, `inline_link_clicks`, `cost_per_action_type`), filtres `date_range` et `breakdown` (âge, genre, placement, device). Avec `level: "ad"`, inclut aussi les diagnostics de pertinence Meta (`quality_ranking`, `engagement_rate_ranking`, `conversion_rate_ranking`) |
 | `get_creatives` | Assets créatifs utilisés (image/vidéo, texte, hook) |
 | `get_audience_estimate` | Taille d'audience estimée pour un targeting donné |
+
+#### Champs pouvant revenir vides selon le volume/l'état du compte
+
+- **`get_adsets.learning_phase`** (`status`, `conversions`, `last_significant_edit`) : Meta ne renseigne ces sous-champs que pendant que l'ad set **délivre activement** (`effective_status: ACTIVE`). Sur un ad set en pause (ou dont la campagne parente est en pause), ils reviennent à `null` — seul `attribution_windows` reste renseigné. `status` prend l'une des valeurs `LEARNING` / `SUCCESS` / `FAIL` d'après la documentation Meta v26.0 ; à date, ce repo n'a pas pu confirmer ces valeurs sur un ad set réellement en apprentissage (aucune campagne active sur le compte de test) — à vérifier dès qu'un client aura une campagne active.
+- **`get_insights` (niveau `ad`) `.quality_ranking` / `.engagement_rate_ranking` / `.conversion_rate_ranking`** : reviennent à `"UNKNOWN"` en dessous d'environ 500 impressions sur l'ad — comportement confirmé en conditions réelles, ce n'est pas un bug du MCP.
+- **Aucun champ Meta n'expose la part d'impressions sur audience nouvelle vs déjà exposée** (saturation d'audience) — recherché explicitement dans la référence Insights, non trouvé. Utiliser `frequency` comme proxy.
 
 ### Écriture (priorité 2)
 
@@ -144,7 +150,7 @@ Meta limite à 200 appels/heure/utilisateur. Le client HTTP (`src/client/meta-ap
 npm run test:manual
 ```
 
-Exécute chaque tool directement (hors transport MCP) et affiche le résultat, pour validation avant connexion à Claude Code en usage réel.
+Exécute chaque tool directement (hors transport MCP) et affiche le résultat, pour validation avant connexion à Claude Code en usage réel. Termine par un **rapport de disponibilité des champs** qui affiche explicitement ce qui revient `null`/`UNKNOWN`/`MISSING` sur le compte testé (phase d'apprentissage, diagnostics de pertinence) — c'est l'info utile pour savoir ce qui sera réellement exploitable par l'UI et l'analyste plus tard.
 
 ## Développement
 
@@ -162,5 +168,8 @@ npm start       # lance la version compilée
 - [x] Retry / backoff et gestion d'erreurs Meta (codes 17, 32, 613, HTTP 429)
 - [x] Tools de lecture (7/7)
 - [x] Tools d'écriture (7/7) + garde-fou preview/confirm systématique
+- [x] Champs fondation pour l'UI/l'autopilot : `learning_phase`, timestamps ad set/ad, diagnostics de pertinence, `business` portfolio, cache config avec TTL (voir `docs/AUDIT.md`)
 - [ ] Transport Streamable HTTP pour déploiement remote
+- [ ] Persistance Neon (comptes, snapshots, insights journaliers, rapports, angles créatifs)
+- [ ] Pipeline d'analyse autopilot (calcul déterministe, format JSON strict, règles anti-sur-optimisation, playbook versionné, planification)
 - [ ] UI de pilotage (multi-comptes, plages de dates, sélection de métriques) — phase séparée, branchée sur ce MCP
