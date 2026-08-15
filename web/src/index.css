@@ -1,0 +1,20 @@
+@import "tailwindcss";
+
+@custom-variant dark (&:where(.dark, .dark *));
+
+/* GR AdLab palette (see web/README.md "Direction visuelle"). */
+@theme {
+  --color-brand-navy: #0f172a;
+  --color-brand-blue: #0067ff;
+  --color-brand-blue-light: #e7f6ff;
+}
+
+html,
+body,
+#root {
+  height: 100%;
+}
+
+body {
+  @apply bg-slate-50 text-slate-900 antialiased dark:bg-slate-950 dark:text-slate-100;
+}
