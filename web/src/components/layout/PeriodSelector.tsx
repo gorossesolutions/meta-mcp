@@ -1,3 +1,4 @@
+import { ArrowRight } from "lucide-react";
 import type { UsePeriodResult } from "../../hooks/usePeriod";
 
 export function PeriodSelector({ period, setPreset, setCustomRange }: UsePeriodResult) {
@@ -29,7 +30,7 @@ export function PeriodSelector({ period, setPreset, setCustomRange }: UsePeriodR
         onChange={(e) => setCustomRange(e.target.value, period.until)}
         className="rounded-md border border-slate-200 bg-white px-2 py-1 text-slate-700 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-200"
       />
-      <span className="text-slate-400">→</span>
+      <ArrowRight size={14} strokeWidth={1.75} className="text-slate-400" aria-hidden />
       <input
         type="date"
         value={period.until}

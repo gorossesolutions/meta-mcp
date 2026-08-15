@@ -1,4 +1,10 @@
 @import "tailwindcss";
+/* Without this, UserButton (@neondatabase/auth-ui) renders with class names
+   like bg-primary/text-foreground that have no CSS definition anywhere —
+   confirmed live: none of document.styleSheets contained them. Text then
+   silently inherits our own body color instead, which happened to look
+   right in dark mode by coincidence and was invisible in light mode. */
+@import "@neondatabase/auth-ui/tailwind";
 
 @custom-variant dark (&:where(.dark, .dark *));
 

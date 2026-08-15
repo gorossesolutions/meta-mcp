@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import { Check } from "lucide-react";
 import { neon } from "../../lib/neon";
 import { toDateOnlyString } from "../../lib/dates";
 import type { CreativeAngle } from "../../types/db";
@@ -190,7 +191,12 @@ export function AngleForm({ clientId, metaEntityId, adCreatedTime, existing, onS
         >
           {saving ? "Enregistrement…" : existing ? "Mettre à jour" : "Enregistrer l'angle"}
         </button>
-        {savedAt && Date.now() - savedAt < 3000 && <span className="text-xs text-emerald-600 dark:text-emerald-400">Enregistré ✓</span>}
+        {savedAt && Date.now() - savedAt < 3000 && (
+          <span className="inline-flex items-center gap-1 text-xs text-emerald-600 dark:text-emerald-400">
+            <Check size={14} strokeWidth={2} aria-hidden />
+            Enregistré
+          </span>
+        )}
       </div>
     </form>
   );

@@ -1,6 +1,7 @@
 import type { ReactNode } from "react";
 import { Link } from "react-router";
 import { UserButton } from "@neondatabase/auth-ui";
+import { Moon, Sun } from "lucide-react";
 import { useDarkMode } from "../../hooks/useDarkMode";
 
 export function AppShell({ clientId, children }: { clientId?: string; children: ReactNode }) {
@@ -29,9 +30,14 @@ export function AppShell({ clientId, children }: { clientId?: string; children: 
               aria-label="Basculer le mode sombre"
               className="rounded-md p-1.5 text-slate-300 hover:bg-white/10 hover:text-white"
             >
-              {dark ? "☀️" : "🌙"}
+              {dark ? <Sun size={16} strokeWidth={1.75} /> : <Moon size={16} strokeWidth={1.75} />}
             </button>
-            <UserButton />
+            {/* Forced into its dark variant regardless of the app's own light/dark
+                toggle — the header background stays navy in both, so UserButton
+                should always render its light-on-dark colors here. */}
+            <div className="dark">
+              <UserButton />
+            </div>
           </div>
         </div>
       </header>
