@@ -6,7 +6,7 @@ import { accountSelectorSchema, jsonResult, withErrorHandling } from "../shared.
 import type { GraphApiListResponse } from "../../types/index.js";
 
 const AD_FIELDS =
-  "id,name,status,effective_status,adset_id,campaign_id,creative{id,name,thumbnail_url,body,title,image_url,video_id,object_story_spec}";
+  "id,name,status,effective_status,adset_id,campaign_id,created_time,updated_time,creative{id,name,thumbnail_url,body,title,image_url,video_id,object_story_spec}";
 
 export interface GetAdsInput {
   client_id?: string;
