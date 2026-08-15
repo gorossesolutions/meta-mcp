@@ -1,7 +1,7 @@
 // Neon Data API + Neon Auth client. See web/README.md "Piège de l'URL
-// Data API" — the URL shown in the Neon console is NOT what this SDK
-// wants; VITE_NEON_DATA_API_URL and VITE_NEON_AUTH_URL below must already
-// be in the short form before they land in .env.
+// Data API" — VITE_NEON_DATA_API_URL and VITE_NEON_AUTH_URL are two
+// DIFFERENT URLs from two different Neon console tabs, both used exactly
+// as the console shows them (no stripping — confirmed via curl).
 
 import { createClient } from "@neondatabase/neon-js";
 import { BetterAuthReactAdapter } from "@neondatabase/neon-js/auth/react/adapters";
@@ -22,5 +22,12 @@ export const neon = createClient({
   },
   dataApi: {
     url: dataApiUrl,
+    // Neon project exposes multiple schemas (app, auth, neon_auth, public —
+    // app.current_user_id()/app.has_client_access() live in `app`, but every
+    // actual table lives in `public`). Without this, the client defaulted to
+    // the FIRST exposed schema ("app") and every query 404'd with "Could not
+    // find the table 'app.<name>' in the schema cache" — confirmed the hard
+    // way in this session. Explicit > relying on exposed-schema list order.
+    options: { db: { schema: "public" } },
   },
 });

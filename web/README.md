@@ -15,26 +15,30 @@ npm run dev
 
 ### Piège de l'URL Data API — lis ça avant de perdre du temps
 
-La console Neon (Data API → Connection details) affiche une URL **longue** :
+**Correction post-test réel (deuxième correction, celle-ci confirmée par `curl` direct)** : deux erreurs successives dans cette note pendant la session de build. D'abord supposé que `VITE_NEON_DATA_API_URL` et `VITE_NEON_AUTH_URL` partagent la même URL courte — faux, ce sont deux URLs distinctes sur deux sous-domaines différents. Ensuite supposé qu'il fallait raccourcir l'URL du Data API (retirer `.apirest` et `/rest/v1`) — faux aussi : un test `curl` direct sur les deux formes montre que la forme raccourcie répond `"query is not supported"` sans header CORS (mauvais endpoint), alors que la forme **longue, telle qu'affichée dans la console**, répond correctement avec `access-control-allow-origin` et une vraie erreur PostgREST. **Coller les deux URLs exactement comme la console les affiche, sans rien retirer.**
+
+**`VITE_NEON_DATA_API_URL`** — la console Neon (Data API → Connection details), utilisée **telle quelle** :
 
 ```
 https://ep-xxx.apirest.us-east-1.aws.neon.tech/neondb/rest/v1
 ```
 
-Le SDK (`@neondatabase/neon-js`) attend une version **raccourcie** de cette même URL — sans le libellé `.apirest` dans le nom d'hôte, et sans le chemin `/rest/v1` final :
+**`VITE_NEON_AUTH_URL`** — la console Neon (onglet **Auth**, pas Data API), sa **propre** URL, sur un sous-domaine différent (`.neonauth`, pas `.apirest`), avec un chemin `/auth` — aussi **telle quelle** :
 
 ```
-https://ep-xxx.us-east-1.aws.neon.tech/neondb
+https://ep-xxx.neonauth.us-east-1.aws.neon.tech/neondb/auth
 ```
 
-Le SDK dérive lui-même les adresses complètes (Data API, Auth) à partir de cette base courte. Coller l'URL longue telle quelle échoue silencieusement ou avec des erreurs peu explicites — c'est le piège le plus probable si le dashboard n'arrive pas à charger de données après setup. `VITE_NEON_DATA_API_URL` et `VITE_NEON_AUTH_URL` prennent en général cette **même** URL courte (voir `.env.example`).
+Utiliser la même URL pour les deux variables échoue avec des erreurs CORS ("No 'Access-Control-Allow-Origin' header") sur les appels d'authentification — c'est le piège le plus probable si le sign up/sign in ne fonctionne pas alors que le reste du dashboard charge. Voir `.env.example` pour le détail complet.
+
+Autre point de config Neon à ne pas oublier : ajouter l'origine du dashboard (`http://localhost:5173` en dev, l'URL Netlify en prod) aux **CORS Allowed Origins** du projet — sans ça, même les bonnes URLs échouent en CORS.
 
 ### Variables d'environnement
 
 | Variable | Description |
 |---|---|
-| `VITE_NEON_DATA_API_URL` | URL courte du projet Neon (voir piège ci-dessus) |
-| `VITE_NEON_AUTH_URL` | Idem, en général identique — utiliser une valeur différente uniquement si la console Neon (onglet Auth) en affiche explicitement une autre |
+| `VITE_NEON_DATA_API_URL` | URL longue "Data API → Connection details" de la console Neon, collée telle quelle (voir piège ci-dessus) |
+| `VITE_NEON_AUTH_URL` | URL de l'onglet "Auth" de la console Neon, distincte de la précédente, collée telle quelle |
 
 Ce sont les **deux seules** variables attendues, et elles sont publiques par conception (URL d'un endpoint protégé par RLS + token, pas un secret). Voir "Sécurité" ci-dessous.
 

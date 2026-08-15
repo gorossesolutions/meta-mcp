@@ -1,0 +1,27 @@
+-- Fixes "permission denied for schema auth" on every authenticated query
+-- that reaches RLS (i.e. all of them, via app.has_client_access ->
+-- app.current_user_id -> auth.user_id()).
+--
+-- Root cause, confirmed live via db/_check-auth-schema-grants.ts:
+-- app.current_user_id() (see 0011_authenticated_role_rebuild.sql) is a
+-- plain SQL function, not SECURITY DEFINER, so it runs as the calling
+-- role (authenticated) and needs its own access to schema auth to
+-- reference auth.user_id() — function-level EXECUTE on auth.user_id()
+-- alone isn't sufficient without schema USAGE too.
+--
+-- `GRANT USAGE ON SCHEMA auth TO authenticated` was tried first (an
+-- earlier version of this file) and Postgres reports it succeeding, but
+-- pg_namespace.nspacl never actually changes — confirmed by re-querying
+-- immediately after in the same session. Schema `auth` is owned by
+-- Neon's own `cloud_admin` role and its ACL appears to be managed/reset
+-- outside of normal SQL GRANT, so granting into it isn't a workable path
+-- here. neondb_owner, by contrast, does have genuine USAGE on schema auth
+-- (confirmed: `SELECT auth.user_id()` succeeds as neondb_owner, returns
+-- NULL outside a JWT-bearing session rather than erroring).
+--
+-- Fix: mark app.current_user_id() SECURITY DEFINER so it runs as its
+-- owner (neondb_owner, which has real access) regardless of caller.
+-- search_path is pinned explicitly, the standard guard against
+-- SECURITY DEFINER search_path hijacking.
+
+ALTER FUNCTION app.current_user_id() SECURITY DEFINER SET search_path = auth, pg_catalog;
