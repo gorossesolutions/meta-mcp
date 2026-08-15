@@ -26,7 +26,9 @@ const DATE_PRESETS = [
   "maximum",
 ] as const;
 
-const BREAKDOWNS = [
+// Exported so callers outside this module (db/sync) can validate/type a
+// single breakdown dimension against the same list without duplicating it.
+export const BREAKDOWNS = [
   "age",
   "gender",
   "publisher_platform",
@@ -36,6 +38,8 @@ const BREAKDOWNS = [
   "region",
   "country",
 ] as const;
+
+export type BreakdownDimension = (typeof BREAKDOWNS)[number];
 
 export interface GetInsightsInput {
   client_id?: string;
