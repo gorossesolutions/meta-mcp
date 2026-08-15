@@ -11,14 +11,15 @@ export interface AdAccountSummary {
   account_status?: number;
   currency?: string;
   timezone_name?: string;
-  business_name?: string;
+  /** The owning Business Manager (portfolio), when this account belongs to one. */
+  business?: { id: string; name?: string };
 }
 
 export async function listAdAccounts(input: { client_id?: string }): Promise<AdAccountSummary[]> {
   const { accessToken } = resolveCredentials(input.client_id);
   const response = await graphGet<GraphApiListResponse<AdAccountSummary>>(
     "me/adaccounts",
-    { fields: "id,name,account_status,currency,timezone_name,business_name" },
+    { fields: "id,name,account_status,currency,timezone_name,business{id,name}" },
     accessToken,
   );
   return response.data;
@@ -30,7 +31,7 @@ export function registerListAdAccountsTool(server: McpServer): void {
     {
       title: "List ad accounts",
       description:
-        "Lists the Meta ad accounts accessible with the resolved token (a specific client's token if client_id is given, otherwise the default META_ACCESS_TOKEN).",
+        "Lists the Meta ad accounts accessible with the resolved token (a specific client's token if client_id is given, otherwise the default META_ACCESS_TOKEN), including which Business Manager portfolio each belongs to, its currency and timezone.",
       inputSchema: {
         client_id: z
           .string()
