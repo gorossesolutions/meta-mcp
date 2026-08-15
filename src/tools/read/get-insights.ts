@@ -6,7 +6,12 @@ import { accountSelectorSchema, jsonResult, withErrorHandling } from "../shared.
 import type { GraphApiListResponse } from "../../types/index.js";
 
 const INSIGHTS_FIELDS =
-  "date_start,date_stop,impressions,reach,frequency,clicks,ctr,cpc,cpm,spend,actions,action_values,purchase_roas";
+  "date_start,date_stop,impressions,reach,frequency,clicks,ctr,cpc,cpm,spend,actions,action_values,purchase_roas,inline_link_clicks,cost_per_action_type";
+
+// Ad relevance diagnostics: only meaningful at ad level (Meta returns "UNKNOWN"
+// rather than erroring at other levels, but that's just noise there) and only
+// populated once an ad clears ~500 impressions — see README for details.
+const AD_QUALITY_RANKING_FIELDS = "quality_ranking,engagement_rate_ranking,conversion_rate_ranking";
 
 const DATE_PRESETS = [
   "today",
@@ -54,11 +59,13 @@ export async function getInsights(input: GetInsightsInput): Promise<Record<strin
   }
 
   const timeRange = input.since && input.until ? { since: input.since, until: input.until } : undefined;
+  const fields =
+    input.level === "ad" ? `${INSIGHTS_FIELDS},${AD_QUALITY_RANKING_FIELDS}` : INSIGHTS_FIELDS;
 
   const response = await graphGet<GraphApiListResponse<Record<string, unknown>>>(
     `${targetId}/insights`,
     {
-      fields: INSIGHTS_FIELDS,
+      fields,
       level: input.level,
       date_preset: timeRange ? undefined : (input.date_preset ?? "last_30d"),
       time_range: timeRange ? JSON.stringify(timeRange) : undefined,
@@ -76,7 +83,7 @@ export function registerGetInsightsTool(server: McpServer): void {
     {
       title: "Get insights",
       description:
-        "Fetches performance metrics (impressions, reach, CTR, CPC, CPM, spend, ROAS, conversions) for an ad account, campaign, ad set or ad, with optional date range and breakdowns (age, gender, placement, device).",
+        "Fetches performance metrics (impressions, reach, CTR, CPC, CPM, spend, ROAS, conversions, inline_link_clicks, cost_per_action_type) for an ad account, campaign, ad set or ad, with optional date range and breakdowns (age, gender, placement, device). Pass level: \"ad\" to also get Meta's relevance diagnostics (quality_ranking, engagement_rate_ranking, conversion_rate_ranking) — these return \"UNKNOWN\" below ~500 impressions.",
       inputSchema: {
         ...accountSelectorSchema,
         object_id: z
