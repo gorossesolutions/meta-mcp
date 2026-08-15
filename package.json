@@ -12,11 +12,13 @@
   },
   "scripts": {
     "build": "tsc -p tsconfig.json",
+    "typecheck": "tsc --noEmit -p tsconfig.check.json",
     "dev": "tsx src/server.ts",
     "start": "node dist/server.js",
     "lint": "eslint src db",
     "test:manual": "tsx test/manual-check.ts",
-    "db:migrate": "tsx db/migrate.ts"
+    "db:migrate": "tsx db/migrate.ts",
+    "db:sync": "tsx db/sync/cli.ts"
   },
   "license": "UNLICENSED",
   "private": true,
