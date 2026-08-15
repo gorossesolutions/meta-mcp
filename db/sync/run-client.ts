@@ -219,6 +219,13 @@ export async function syncInsightsWindow(
         until,
         breakdowns,
         limit: SYNC_LIMIT,
+        // insights_daily is one row per calendar day — without this Meta
+        // collapses the whole since..until range into a single row, which
+        // upsertInsightRow would then store under since's date as if it
+        // were one day's numbers. Confirmed live: a query without this
+        // returned one row spanning date_start..date_stop instead of a
+        // per-day series.
+        time_increment: 1,
       });
       for (const row of rows) {
         if (dryRun) {

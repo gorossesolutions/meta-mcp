@@ -51,6 +51,13 @@ export interface GetInsightsInput {
   until?: string;
   breakdowns?: Array<(typeof BREAKDOWNS)[number]>;
   limit?: number;
+  /**
+   * Days per returned row (1-90). Omit for Meta's default: ONE row
+   * aggregating the whole since/until (or date_preset) range — fine for a
+   * single total, but silently wrong for anything expecting a daily
+   * series. db/sync always passes 1 — see run-client.ts.
+   */
+  time_increment?: number;
 }
 
 export async function getInsights(input: GetInsightsInput): Promise<Record<string, unknown>[]> {
@@ -73,6 +80,7 @@ export async function getInsights(input: GetInsightsInput): Promise<Record<strin
       level: input.level,
       date_preset: timeRange ? undefined : (input.date_preset ?? "last_30d"),
       time_range: timeRange ? JSON.stringify(timeRange) : undefined,
+      time_increment: input.time_increment,
       breakdowns: input.breakdowns?.join(","),
       limit: input.limit ?? 100,
     },
@@ -109,6 +117,15 @@ export function registerGetInsightsTool(server: McpServer): void {
           .describe("Custom range end, YYYY-MM-DD. Overrides date_preset if set with since."),
         breakdowns: z.array(z.enum(BREAKDOWNS)).optional().describe("Dimensions to break results down by."),
         limit: z.number().int().min(1).max(500).optional().describe("Max rows to return (default 100)."),
+        time_increment: z
+          .number()
+          .int()
+          .min(1)
+          .max(90)
+          .optional()
+          .describe(
+            "Days per returned row. Omit for a single row aggregating the whole range. Pass 1 for a daily series.",
+          ),
       },
     },
     withErrorHandling(async (input) => jsonResult(await getInsights(input))),
