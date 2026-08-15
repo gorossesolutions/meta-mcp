@@ -32,6 +32,24 @@ function toTimestamptzParam(value: unknown): string | null {
   return typeof value === "string" && value.length > 0 ? value : null;
 }
 
+// --- clients (bootstrap from accounts.config.json) ------------------------
+//
+// The sync job is the only thing that ever creates `clients` rows (RLS
+// restricts INSERT there to svc_sync already). One Neon client per
+// accounts.config.json entry, bridged by config_client_id — see
+// db/migrations/0009_clients_config_bridge.sql.
+
+export async function upsertClientFromConfig(client: Client, configClientId: string, label: string): Promise<{ id: string; isActive: boolean }> {
+  const { rows } = await client.query<{ id: string; is_active: boolean }>(
+    `INSERT INTO clients (name, config_client_id)
+     VALUES ($1, $2)
+     ON CONFLICT (config_client_id) DO UPDATE SET name = EXCLUDED.name, updated_at = now()
+     RETURNING id, is_active`,
+    [label, configClientId],
+  );
+  return { id: rows[0].id, isActive: rows[0].is_active };
+}
+
 // --- ad_accounts ---------------------------------------------------------
 
 export interface AdAccountRow {
