@@ -56,7 +56,7 @@ RLS activé sur **toutes** les tables, sans exception. Trois rôles :
 
 | Rôle | Accès | Comment |
 |---|---|---|
-| **owner** (celui qui fait tourner les migrations, ex. `neondb_owner`) | Total, sans restriction RLS | Propriétaire des tables — Postgres exempte le propriétaire des policies RLS par défaut, et ce schéma ne force pas `FORCE ROW LEVEL SECURITY`. À garder aussi précieusement qu'un identifiant superuser. |
+| **owner** (celui qui fait tourner les migrations, ex. `neondb_owner`) | Total, RLS entièrement contourné | **Porte explicitement l'attribut `BYPASSRLS`** — confirmé dans la doc Neon, corrigé après une première version de ce document qui minimisait ça à "propriétaire exempté par défaut". Ce n'est pas une nuance : `BYPASSRLS` ignore le RLS même sur des tables où l'owner ne serait pas propriétaire, et surtout, ça veut dire qu'une connexion accidentelle avec `DATABASE_URL` (au lieu de `DATABASE_URL_SYNC`) contourne intégralement l'isolation par client, silencieusement, sans la moindre erreur. C'est précisément pour ça que `db/sync/guard.ts` vérifie `current_user` côté base avant de laisser tourner la moindre requête du job de sync — voir "Garde-fou svc_sync" ci-dessous. Cette connection string doit être gardée aussi précieusement qu'un identifiant superuser. |
 | **svc_sync** | Lecture/écriture sur tous les clients, sans passer par `user_clients` | Rôle applicatif pour le futur job de sync côté serveur. Toutes les policies vérifient explicitement `current_user = 'svc_sync'` en OR — pas de `BYPASSRLS` utilisé (voir note ci-dessous). |
 | **authenticated** | Lecture/écriture scoped par `user_clients`, via le JWT Neon Auth | Rôle attendu du Data API de Neon (PostgREST) pour un accès direct navigateur. |
 
