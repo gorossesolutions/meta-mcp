@@ -4,7 +4,11 @@ Schéma de persistance pour meta-ads-mcp : un seul projet Neon, une seule base, 
 
 ## Setup
 
+**Ordre obligatoire, dans ce sens précis — active le Data API AVANT de lancer la moindre migration** (sur un projet vierge) : le Data API crée et configure lui-même le rôle `authenticated`, ainsi que la fonction `auth.user_id()` (extension `pg_session_jwt`) que `0008_rls.sql` utilise. Créer ce rôle nous-mêmes dans une migration — ce que faisait une première version de `0008_rls.sql` — fait échouer le bouton "Enable Data API" avec `authenticated role already exists`, confirmé sur le vrai projet derrière ce schéma. Voir "Incident : rôle authenticated et Data API" ci-dessous pour le détail et pour corriger un projet qui a déjà ce problème.
+
 ```bash
+# 1. Neon console > ton projet > Data API > Enable Data API
+# 2. Puis seulement :
 cp .env.example .env
 # Renseigne DATABASE_URL avec la connection string OWNER de ton projet Neon
 # (Neon console > ton projet > Connect > sélectionne le rôle owner, PAS le
@@ -26,6 +30,21 @@ ALTER ROLE svc_sync WITH PASSWORD 'un-mot-de-passe-fort-genere';
 ```
 
 Construis ensuite `DATABASE_URL_SYNC` avec ce mot de passe et ajoute-le à `.env` (jamais commité, `.gitignore` le protège déjà). Le job refuse de démarrer tant que cette variable n'est pas configurée avec un rôle qui répond bien `svc_sync` à `SELECT current_user` — voir "Garde-fou svc_sync" ci-dessous.
+
+## Incident : rôle `authenticated` et Data API
+
+`0008_rls.sql` créait à l'origine le rôle `authenticated` lui-même (`CREATE ROLE authenticated WITH NOLOGIN`). Ça bloque le bouton "Enable Data API" de la console Neon avec l'erreur `authenticated role already exists` — le Data API veut créer et configurer ce rôle lui-même (il lui attache notamment ce qu'il faut pour que `auth.user_id()` fonctionne), et refuse de le faire s'il existe déjà.
+
+**Sur un projet déjà touché** (migrations déjà appliquées, rôle déjà créé par erreur) :
+
+1. `npx tsx db/teardown-authenticated-role.ts` — preview uniquement, affiche exactement ce qui serait supprimé (introspecté en direct depuis `pg_catalog`, pas une liste supposée) : les privilèges `SELECT`/`INSERT`/`UPDATE`/`DELETE` accordés au rôle sur chaque table concernée, `USAGE` sur le schéma `app`, `EXECUTE` sur `app.current_user_id()`/`app.has_client_access()`, puis `DROP ROLE authenticated`. **Ne touche à aucune ligne, aucune table, aucune policy** (aucune policy ne référence `authenticated` par un `TO authenticated` — voir `db/migrations/0011_authenticated_role_rebuild.sql`), et ne touche pas `svc_sync`.
+2. `npx tsx db/teardown-authenticated-role.ts --yes` — exécute réellement.
+3. Neon console > Enable Data API — devrait passer maintenant.
+4. `npm run db:migrate` — applique `0011_authenticated_role_rebuild.sql`, qui re-crée les `GRANT` et les policies pour le rôle `authenticated` (désormais créé par Neon), et bascule `app.current_user_id()` sur `auth.user_id()` (voir point suivant). Refuse de s'exécuter (message explicite) si le rôle `authenticated` n'existe pas encore — donc si l'étape 3 n'a pas été faite.
+
+**Sur un projet vierge** : `0008_rls.sql` est corrigé pour plus jamais créer ce rôle — il vérifie juste qu'il existe déjà et échoue avec un message clair sinon. D'où l'ordre imposé dans "Setup" ci-dessus : Data API avant migrations, toujours.
+
+**`auth.user_id()` au lieu du parsing manuel de JWT** : `app.current_user_id()` utilisait `current_setting('request.jwt.claims', true)::jsonb ->> 'sub'` — un contournement raisonnable tant que le Data API n'était pas branché, mais Neon expose sa propre fonction `auth.user_id()` (extension `pg_session_jwt`, provisionnée avec le Data API) qui fait exactement ça, en supporté officiellement. Vérifié pendant cette session : `auth.user_id()` retourne du `text` et correspond au type réel de `neon_auth.users_sync.id` (également `text`, confirmé dans la doc Neon) — `user_clients.user_id` était donc déjà du bon type, aucun changement de colonne nécessaire.
 
 ## Job de synchronisation Meta → Neon (`db/sync/`)
 
@@ -119,12 +138,10 @@ RLS activé sur **toutes** les tables, sans exception. Trois rôles :
 | Rôle | Accès | Comment |
 |---|---|---|
 | **owner** (celui qui fait tourner les migrations, ex. `neondb_owner`) | Total, RLS entièrement contourné | **Porte explicitement l'attribut `BYPASSRLS`** — confirmé dans la doc Neon, corrigé après une première version de ce document qui minimisait ça à "propriétaire exempté par défaut". Ce n'est pas une nuance : `BYPASSRLS` ignore le RLS même sur des tables où l'owner ne serait pas propriétaire, et surtout, ça veut dire qu'une connexion accidentelle avec `DATABASE_URL` (au lieu de `DATABASE_URL_SYNC`) contourne intégralement l'isolation par client, silencieusement, sans la moindre erreur. C'est précisément pour ça que `db/sync/guard.ts` vérifie `current_user` côté base avant de laisser tourner la moindre requête du job de sync — voir "Garde-fou svc_sync" ci-dessous. Cette connection string doit être gardée aussi précieusement qu'un identifiant superuser. |
-| **svc_sync** | Lecture/écriture sur tous les clients, sans passer par `user_clients` | Rôle applicatif pour le futur job de sync côté serveur. Toutes les policies vérifient explicitement `current_user = 'svc_sync'` en OR — pas de `BYPASSRLS` utilisé (voir note ci-dessous). |
-| **authenticated** | Lecture/écriture scoped par `user_clients`, via le JWT Neon Auth | Rôle attendu du Data API de Neon (PostgREST) pour un accès direct navigateur. |
+| **svc_sync** | Lecture/écriture sur tous les clients, sans passer par `user_clients` | Rôle applicatif pour le job de sync côté serveur (`db/sync/`, en service depuis l'Étape 3). Toutes les policies vérifient explicitement `current_user = 'svc_sync'` en OR — pas de `BYPASSRLS` utilisé (voir note ci-dessous). Créé par `0008_rls.sql`, jamais touché par l'incident `authenticated` ci-dessous. |
+| **authenticated** | Lecture/écriture scoped par `user_clients`, via le JWT Neon Auth | Rôle créé et configuré par le **Data API de Neon lui-même** à son activation — plus par une migration de ce repo, voir "Incident : rôle authenticated et Data API" ci-dessous. Nom confirmé (recherche officielle Neon effectuée pendant cette session, plus l'erreur `already exists` elle-même qui le prouve) : ce n'était plus une hypothèse. |
 
 **Pourquoi pas `BYPASSRLS` pour `svc_sync`** : accorder l'attribut `BYPASSRLS` à un rôle est en Postgres standard réservé aux superusers. Je n'ai pas pu vérifier si le rôle owner d'un projet Neon a ce privilège sur une instance managée — plutôt que de parier dessus dans une migration, chaque policy OR explicitement `current_user = 'svc_sync'`, ce qui fonctionne sans privilège élevé, sur n'importe quel hébergeur Postgres. Si tu confirmes que `BYPASSRLS` est accordable sur ton projet, c'est une simplification possible plus tard — pas faite ici par prudence.
-
-**Hypothèse à vérifier avant de brancher le Data API** : le nom de rôle `authenticated` suit la convention Supabase/PostgREST, sur laquelle le Data API de Neon est modélisé. Je n'ai pas de confirmation ferme que Neon utilise exactement ce nom sur ton projet — à vérifier dans la doc Neon Data API au moment de câbler l'accès navigateur (phase UI, pas cette session), et à ajuster les `GRANT` de `0008_rls.sql` si besoin.
 
 ### Qui peut écrire quoi
 

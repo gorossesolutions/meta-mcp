@@ -1,5 +1,18 @@
 -- Row-Level Security: every table, no exceptions.
 --
+-- PREREQUISITE — enable Data API BEFORE running this migration: Neon's
+-- Data API creates and configures the `authenticated` role itself (along
+-- with the auth.user_id() helper this file uses below). An earlier version
+-- of this migration created `authenticated` itself, which then made
+-- Neon's "Enable Data API" button fail with "authenticated role already
+-- exists" — confirmed the hard way on the real project this schema was
+-- built for. Fixed by no longer creating that role at all: this migration
+-- now assumes it already exists and fails loudly (see the guard below) if
+-- it doesn't, instead of silently recreating the conflict. See
+-- db/README.md "Setup" for the required order of operations, and
+-- db/migrations/0011_authenticated_role_rebuild.sql for how the
+-- already-affected project was fixed after the fact.
+--
 -- ROLE MODEL (see db/README.md "Security model" for the full writeup):
 --   - The role this migration runs as (Neon's project owner role, e.g.
 --     "neondb_owner") is the table OWNER of everything created here. Table
@@ -8,21 +21,19 @@
 --     the owner role keeps full admin access via psql/Neon's SQL console.
 --     This is a trust boundary: hold the owner connection string as
 --     tightly as you'd hold a superuser credential.
---   - "svc_sync": a non-owner role for the server-side sync job. Needs
---     read/write across every client, unrestricted by user_clients. NOT
---     using BYPASSRLS here (uncertain whether Neon's project-owner role
---     can grant that attribute to another role on a managed instance —
---     unverified, not something to guess at in a migration). Instead,
---     every policy below explicitly ORs in `current_user = 'svc_sync'`,
---     which needs no elevated Postgres privilege and works identically on
---     any Postgres host.
---   - "authenticated": the role Neon's Data API (PostgREST) is expected to
---     execute browser requests as, scoped per-request by the caller's JWT
---     (Neon Auth / Stack Auth). ASSUMPTION FLAGGED: this role name follows
---     the Supabase/PostgREST convention Neon's Data API is modeled on —
---     verify it matches your actual Neon project's Data API role name
---     before wiring up browser access (a later phase), and adjust the
---     GRANT statements below if it differs.
+--   - "svc_sync": a non-owner role for the server-side sync job, created
+--     by THIS migration (unaffected by the authenticated-role issue
+--     above). Needs read/write across every client, unrestricted by
+--     user_clients. NOT using BYPASSRLS here (uncertain whether Neon's
+--     project-owner role can grant that attribute to another role on a
+--     managed instance — unverified, not something to guess at in a
+--     migration). Instead, every policy below explicitly ORs in
+--     `current_user = 'svc_sync'`, which needs no elevated Postgres
+--     privilege and works identically on any Postgres host.
+--   - "authenticated": the role Neon's Data API (PostgREST) executes
+--     browser requests as, scoped per-request by the caller's JWT (Neon
+--     Auth). Created and configured by Neon itself, NOT by this migration
+--     — see prerequisite above.
 --
 -- svc_sync is created WITH LOGIN but no password: set one manually via the
 -- Neon SQL console (`ALTER ROLE svc_sync WITH PASSWORD '...'`) — never put
@@ -39,18 +50,22 @@ BEGIN
     CREATE ROLE svc_sync WITH LOGIN;
   END IF;
   IF NOT EXISTS (SELECT FROM pg_roles WHERE rolname = 'authenticated') THEN
-    CREATE ROLE authenticated WITH NOLOGIN;
+    RAISE EXCEPTION 'Role "authenticated" does not exist. Enable the Data API in the Neon console first — it creates this role itself. See db/README.md "Setup".';
   END IF;
 END
 $$;
 
 CREATE SCHEMA IF NOT EXISTS app;
 
--- Returns the Neon Auth user id (JWT "sub" claim) for the current request,
--- or NULL when there's no JWT in scope (e.g. svc_sync connecting directly).
+-- Neon's own identity helper (pg_session_jwt extension, provisioned
+-- alongside the Data API/Neon Auth) — returns the JWT "sub" claim as text,
+-- or NULL when there's no JWT in scope (e.g. svc_sync connecting
+-- directly). Confirmed during this session: matches
+-- neon_auth.users_sync.id's own type, so user_clients.user_id (text)
+-- needs no cast anywhere here.
 CREATE OR REPLACE FUNCTION app.current_user_id() RETURNS text
 LANGUAGE sql STABLE AS $$
-  SELECT NULLIF(current_setting('request.jwt.claims', true), '')::jsonb ->> 'sub';
+  SELECT auth.user_id();
 $$;
 
 -- True for svc_sync unconditionally, or for a browser user with a
