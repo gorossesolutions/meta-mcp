@@ -213,8 +213,9 @@ async function main() {
             process.env.AD_NAME_ANGLE_PATTERN,
           );
           const chunks = args.backfill ? chunkDateRange(since, until, 30) : ([[since, until]] as Array<[string, string]>);
+          const dryRunErrors = [...entities.errors];
           for (const [chunkSince, chunkUntil] of chunks) {
-            await syncInsightsWindow(
+            const insightsPreview = await syncInsightsWindow(
               db,
               entry.client_id,
               neonClient.id,
@@ -226,8 +227,10 @@ async function main() {
               args.breakdown,
               true,
             );
+            dryRunErrors.push(...insightsPreview.errors);
           }
           console.log(`[dry-run] "${entry.client_id}": ${entities.entitiesProcessed} entities previewed, no sync_runs row created.`);
+          if (dryRunErrors.length > 0) console.log(`[dry-run] step errors (would also appear in a real run): ${dryRunErrors.join(" | ")}`);
         } catch (error) {
           console.error(`[dry-run] "${entry.client_id}" failed: ${msg(error)}`);
         }

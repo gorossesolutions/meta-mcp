@@ -27,6 +27,11 @@ import {
 } from "./upserts.js";
 
 const SYNC_LIMIT = 500; // max page size the read tools accept — no pagination beyond one page yet, see db/README.md limitations
+// /adcreatives with object_story_spec is a heavier payload per row; Meta
+// rejects limit=500 there ("reduce the amount of data you're asking for"),
+// confirmed against a real account during this session. No pagination
+// beyond one page here either — see db/README.md limitations.
+const CREATIVES_SYNC_LIMIT = 50;
 
 function msg(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
@@ -139,7 +144,7 @@ export async function syncEntities(
       if (creative?.id) creativeToAdId.set(creative.id, String(ad.id));
     }
 
-    const creatives = await getCreatives({ client_id: configClientId, limit: SYNC_LIMIT });
+    const creatives = await getCreatives({ client_id: configClientId, limit: CREATIVES_SYNC_LIMIT });
     const creativeList = Array.isArray(creatives) ? creatives : [creatives];
     for (const creative of creativeList) {
       const creativeId = String(creative.id);
