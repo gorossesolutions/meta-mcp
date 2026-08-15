@@ -1,0 +1,15 @@
+# Site "base directory" in Netlify should be set to "web" (repo has other
+# code outside this folder — the MCP server and db/ live at the repo root).
+# With base = "web", these paths are relative to web/, not the repo root.
+
+[build]
+  command = "npm run build"
+  publish = "dist"
+
+# SPA fallback: react-router handles client-side routes like
+# /clients/:id/accounts/:id — without this, a direct load or refresh on
+# any nested URL 404s at the Netlify edge before React ever runs.
+[[redirects]]
+  from = "/*"
+  to = "/index.html"
+  status = 200
